@@ -1,5 +1,5 @@
 const { cmd } = require("../command");
-const { downloadContentFromMessage } = require('@whiskeysockets/baileys'); // Baileys core function
+const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
 
 // Helper function to convert Media Stream to a Buffer
 async function streamToBuffer (stream) {
@@ -14,8 +14,8 @@ async function streamToBuffer (stream) {
 cmd(
     {
         pattern: "save",
-        react: "✅", 
-        desc: "Resend Status or One-Time View Media (Stream Download Fix)",
+        react: "🔑", // Key Debugging Emoji
+        desc: "Resend Status or One-Time View Media (Final Key Fix)",
         category: "general",
         filename: __filename,
     },
@@ -34,61 +34,88 @@ cmd(
                 return reply("*කරුණාකර Status/Media Message එකකට reply කරන්න!* 🧐");
             }
 
-            // 1. Media Object එක ලබා ගැනීම (Log එක අනුව quoted.quoted හෝ quoted.fakeObj)
-            const mediaObject = quoted.quoted || quoted.fakeObj;
-            let saveCaption = "*💾 Saved and Resent!*";
+            reply("*Status Message Data නැවත පූරණය කරමින්...* 🗝️");
+
+            // 1. Status Message ID එක ලබා ගැනීම
+            const quotedKey = m.message.extendedTextMessage.contextInfo.quotedMessage;
+            const quotedMsgId = m.message.extendedTextMessage.contextInfo.stanzaId;
             
-            if (!mediaObject) {
-                return reply("*⚠️ Media Content එක හඳුනාගැනීමට අසමත් විය.*");
+            if (!quotedKey || !quotedMsgId) {
+                return reply("*⚠️ Status Message Context එක සොයාගත නොහැක. එය Valid Status එකක් නොවේ.*");
+            }
+
+            // 2. Message ID එක භාවිතයෙන් සම්පූර්ණ Status Data එක නැවත Fetch කිරීම (loadMessage)
+            // අපිට Media Key එක ලබා ගැනීමට නම්, Bot විසින් Status එකේ සත්‍ය message එක load කළ යුතුයි.
+            // ZANTA_MD client (zanta) එකේ loadMessage method එකක් ඇති බවට අපි උපකල්පනය කරමු.
+            let fullQuotedMessage;
+            try {
+                // We use the sender JID (status@broadcast) and the original message ID
+                fullQuotedMessage = await zanta.loadMessage(
+                    "status@broadcast", 
+                    quotedMsgId
+                );
+            } catch (e) {
+                console.error("Failed to load message:", e);
+                return reply("*⚠️ සම්පූර්ණ Status Message එක Load කිරීම අසාර්ථක විය.*");
+            }
+
+            if (!fullQuotedMessage || !fullQuotedMessage.message) {
+                 return reply("*⚠️ Load කළ Message එක හිස්ය. එය Text Status එකක් හෝ Error එකක්.*");
             }
             
-            // 2. Media Type එක තීරණය කිරීම (Baileys downloadContentFromMessage සඳහා අවශ්‍යයි)
-            const messageType = Object.keys(mediaObject)[0];
+            // 3. Media Object එක ලබා ගැනීම (Media Key සහිත)
+            // Status messages බොහෝ විට viewOnceMessage තුළ ඇති බැවින්, අපි එය පරීක්ෂා කරමු.
+            const innerMessage = fullQuotedMessage.message.viewOnceMessage 
+                                ? fullQuotedMessage.message.viewOnceMessage.message 
+                                : fullQuotedMessage.message;
             
-            if (!['imageMessage', 'videoMessage', 'documentMessage'].includes(messageType)) {
-                return reply("*⚠️ යැවීමට සහය නොදක්වයි (Image, Video, Document පමණි).*");
+            const messageType = Object.keys(innerMessage).find(key => key.endsWith('Message'));
+
+            if (!messageType) {
+                 return reply("*⚠️ Loaded Status එකේ Media Content එකක් හමු නොවේ.*");
             }
             
-            // 3. Media File Download (Baileys' native function භාවිතයෙන්)
-            reply("*Status Media File එක Download කරමින් (Decryption)...* ⏳");
+            // 4. Media File Download (Native Baileys Method භාවිතයෙන්)
+            reply("*Media Key සහිතව File එක Decrypt කරමින්...* 🔑");
             
-            // Message Content එක download කිරීම සඳහා Baileys primitive එක ලබා ගැනීම.
-            // This relies on the Baileys library being initialized correctly in ZANTA_MD.
+            const mediaObjectToDownload = innerMessage[messageType];
+            
+            // Media Type එක (image, video, document)
+            const downloadType = messageType.replace('Message', '');
+            
+            // Decryption සහ Download සඳහා Stream ලබා ගැනීම
             const stream = await downloadContentFromMessage(
-                mediaObject, // The inner media message object (e.g., videoMessage)
-                messageType.replace('Message', '') // The correct media type (image, video, document)
+                mediaObjectToDownload,
+                downloadType
             );
             
             // Stream එක Buffer එකක් බවට පරිවර්තනය කිරීම
             const mediaBuffer = await streamToBuffer(stream);
             
-            // 4. Message Options සැකසීම (Buffer භාවිතයෙන්)
+            // 5. Message Options සැකසීම සහ යැවීම
             let messageOptions = {};
+            let saveCaption = "*✅ Status Media Saved!*";
             
-            if (messageType === 'imageMessage') {
+            if (downloadType === 'image') {
                 messageOptions = { image: mediaBuffer, caption: saveCaption };
-            } else if (messageType === 'videoMessage') {
+            } else if (downloadType === 'video') {
                 messageOptions = { video: mediaBuffer, caption: saveCaption };
-            } else if (messageType === 'documentMessage') {
-                // Document සඳහා mime type සහ file name අවශ්‍ය වේ.
-                const mediaData = mediaObject[messageType];
+            } else if (downloadType === 'document') {
                 messageOptions = { 
                     document: mediaBuffer, 
-                    fileName: mediaData.fileName || 'saved_media', 
-                    mimetype: mediaData.mimetype, 
+                    fileName: mediaObjectToDownload.fileName || 'saved_media', 
+                    mimetype: mediaObjectToDownload.mimetype, 
                     caption: saveCaption 
                 };
             }
-
-            // 5. Message යැවීම
+            
             await zanta.sendMessage(from, messageOptions, { quoted: mek });
 
-            return reply("*වැඩේ හරි 🙃✅*");
+            return reply("*හරි! මේ පාරනම් වැඩේ හරි යන්න ඕනේ 💯✅*");
 
         } catch (e) {
-            // Debugging සඳහා error එක console එකේ පෙන්වීම අත්‍යවශ්‍යයි
-            console.error("--- FINAL MEDIA DOWNLOAD ERROR ---", e);
-            reply(`*Error downloading or sending media:* ${e.message || e}`);
+            console.error("--- FINAL CRITICAL ERROR ---", e);
+            reply(`*🚨 අතිශය තීරණාත්මක දෝෂය:* ${e.message || e}. ඔබගේ Framework එක Status Message Load කිරීමට අසමත් වී ඇත (loadMessage function එක).`);
         }
     }
 );
