@@ -1,12 +1,12 @@
 const { cmd, commands } = require("../command");
 
-const checkAdminRightsAndUpdate = async (zanta, from, reply, isGroup, m) => {
+// --- Core Admin Check Helper Function (group.js වෙතින් පිටපත් කර ඇත) ---
+const checkAdminStatus = async (zanta, from, reply, isGroup, m, requireUserAdmin = true) => {
     if (!isGroup) {
         reply("*This command can only be used in a Group!* 🙁");
         return false;
     }
 
-    // --- 🤖 Bot Admin Status එක නැවත Fetch කර තහවුරු කිරීම ---
     try {
         let groupMeta = await zanta.groupMetadata(from);
         const botJid = zanta.user.id;
@@ -14,19 +14,16 @@ const checkAdminRightsAndUpdate = async (zanta, from, reply, isGroup, m) => {
         
         const admins = groupMeta.participants.filter(p => p.admin !== null).map(p => p.id);
         const isBotAdminNew = admins.includes(botJid);
-        const isUserAdminNew = admins.includes(senderJid); // මෙය Invite/Link වලට අත්‍යවශ්‍ය නැතත්, Mute/Unmute වලට අවශ්‍යයි
+        const isUserAdminNew = admins.includes(senderJid);
 
         if (!isBotAdminNew) {
             reply("*I need to be an Admin in this group to use this command!* 🤖❌");
             return false;
         }
         
-        // Mute/Unmute වලදී User Admin වීම අත්‍යවශ්‍යයි.
-        if (m.command === 'mute' || m.command === 'unmute' || m.command === 'open' || m.command === 'close') {
-             if (!isUserAdminNew) {
-                 reply("*You must be an Admin to change Group Settings!* 👮‍♂️❌");
-                 return false;
-             }
+        if (requireUserAdmin && !isUserAdminNew) {
+            reply("*You must be an Admin to use this command!* 👮‍♂️❌");
+            return false;
         }
 
         return true; 
@@ -37,6 +34,7 @@ const checkAdminRightsAndUpdate = async (zanta, from, reply, isGroup, m) => {
         return false;
     }
 };
+
 
 // --- MUTE/CLOSE COMMAND ---
 cmd(
@@ -49,8 +47,8 @@ cmd(
     filename: __filename,
   },
   async (zanta, mek, m, { from, reply, isGroup, isAdmins }) => {
-    // Admin Check එක අලුතින් සිදු කරයි
-    if (!await checkAdminRightsAndUpdate(zanta, from, reply, isGroup, m)) return;
+    // User Admin අවශ්‍යයි (requireUserAdmin default = true)
+    if (!await checkAdminStatus(zanta, from, reply, isGroup, m)) return;
 
     try {
       reply("*Closing group for members... 🔒*");
@@ -75,8 +73,8 @@ cmd(
     filename: __filename,
   },
   async (zanta, mek, m, { from, reply, isGroup, isAdmins }) => {
-    // Admin Check එක අලුතින් සිදු කරයි
-    if (!await checkAdminRightsAndUpdate(zanta, from, reply, isGroup, m)) return;
+    // User Admin අවශ්‍යයි
+    if (!await checkAdminStatus(zanta, from, reply, isGroup, m)) return;
 
     try {
       reply("*Opening group for all members... 🔓*");
@@ -101,9 +99,8 @@ cmd(
     filename: __filename,
   },
   async (zanta, mek, m, { from, reply, isGroup, isAdmins }) => {
-    // Admin Check එක අලුතින් සිදු කරයි
-    // Mute/Unmute මෙන් නොව, Invite සඳහා User Admin වීම අනිවාර්යයෙන් අවශ්‍ය නැත, Bot Admin වීම පමණක් අවශ්‍ය වේ.
-    if (!await checkAdminRightsAndUpdate(zanta, from, reply, isGroup, m)) return;
+    // User Admin අවශ්‍ය නැත (requireUserAdmin = false)
+    if (!await checkAdminStatus(zanta, from, reply, isGroup, m, false)) return;
 
     try {
       reply("*Generating Invite Link... 🔗*");
