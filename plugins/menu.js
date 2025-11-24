@@ -119,7 +119,7 @@ cmd(
             menuText += "╰──────────────┈⊷\n\n";
 
             // 🚨 Magic Text (Interactive Reply එකට අත්‍යවශ්‍යයි)
-            menuText += "*Choose a menu option by replying with the number*\n";
+            menuText += "Choose a menu option by replying with the number\n";
 
             // 3. Footer
             menuText += "\n➖➖➖➖➖➖➖➖➖➖➖➖\n";
@@ -141,3 +141,4 @@ cmd(
         }
     }
 );
+
