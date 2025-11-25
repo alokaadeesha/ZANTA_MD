@@ -11,66 +11,85 @@ const {
 const fs = require('fs');
 const P = require('pino');
 const express = require('express');
-const axios = require('axios');
+const axios = require('axios'); // 👈 API Session Restore සඳහා මෙය අත්‍යවශ්‍යයි
 const path = require('path');
-const qrcode = require('qrcode-terminal');
-
-const config = require('./config');
 const { sms, downloadMediaMessage } = require('./lib/msg');
 const {
     getBuffer, getGroupAdmins, getRandom, h2k, isUrl, Json, runtime, sleep, fetchJson
 } = require('./lib/functions');
-const { File } = require('megajs');
 const { commands, replyHandlers } = require('./command');
+
+const config = require('./config'); // config file එක load කරයි
 
 const app = express();
 const port = process.env.PORT || 8000;
 
 const prefix = '.';
 const ownerNumber = ['94743404814'];
-const credsPath = path.join(__dirname, '/auth_info_baileys/creds.json');
+const authDir = path.join(__dirname, '/auth_info_baileys/');
+const credsPath = path.join(authDir, 'creds.json');
 
-// Session ID එක වෙනස් නොකරන ලෙස ඔබ කළ ඉල්ලීම පරිදි, MEGA Logic එක මෙහි තබනවා.
+// --- Session Restore Logic (API Call) ---
 async function ensureSessionFile() {
     if (!fs.existsSync(credsPath)) {
         if (!config.SESSION_ID) {
-            console.error('❌ SESSION_ID env variable is missing. Cannot restore session.');
+            console.error('❌ SESSION_ID env variable is missing. Cannot proceed.');
             process.exit(1);
         }
 
-        console.log("🔄 creds.json not found. Downloading session from MEGA...");
+        const sessionIdKey = config.SESSION_ID;
 
-        const sessdata = config.SESSION_ID;
-        const filer = File.fromURL(`https://mega.nz/file/${sessdata}`);
+        console.log(`🔄 Session file not found. Attempting to fetch session data for key: ${sessionIdKey}`);
 
-        filer.download((err, data) => {
-            if (err) {
-                console.error("❌ Failed to download session file from MEGA:", err);
-                process.exit(1);
+        try {
+            // 💡 ඔබගේ Short Session ID එක Base64 Session JSON බවට පත් කරන API URL එක
+            const API_URL = `https://api.samuraibot.xyz/api/session/${sessionIdKey}`;
+            
+            console.log(`Fetching session from API: ${API_URL}`);
+            
+            const { data } = await axios.get(API_URL);
+            
+            if (!data || !data.session) {
+                 throw new Error("Invalid response from session API: session data is missing.");
             }
-
-            fs.mkdirSync(path.join(__dirname, '/auth_info_baileys/'), { recursive: true });
-            fs.writeFileSync(credsPath, data);
-            console.log("✅ Session downloaded and saved. Restarting bot...");
+            
+            // API Response එක Base64 String එකක් බවට සලකයි (Decode කරයි)
+            const sessionData = Buffer.from(data.session, 'base64').toString('utf-8');
+            
+            // auth_info_baileys folder එක සෑදීම
+            if (!fs.existsSync(authDir)) {
+                 fs.mkdirSync(authDir, { recursive: true });
+            }
+            
+            // creds.json file එක ලිවීම
+            fs.writeFileSync(credsPath, sessionData);
+            
+            console.log("✅ Session restored via API and saved. Connecting bot...");
             setTimeout(() => {
                 connectToWA();
-            }, 2000);
-        });
+            }, 1000);
+
+        } catch (e) {
+            console.error("❌ Failed to restore session via API. Check SESSION_ID and API URL:", e.message || e);
+            process.exit(1);
+        }
     } else {
         setTimeout(() => {
             connectToWA();
         }, 1000);
     }
 }
+// --- Session Restore Logic End ---
+
 
 async function connectToWA() {
     console.log("Connecting ZANTA-MD 🧬...");
-    const { state, saveCreds } = await useMultiFileAuthState(path.join(__dirname, '/auth_info_baileys/'));
+    const { state, saveCreds } = await useMultiFileAuthState(authDir);
     const { version } = await fetchLatestBaileysVersion();
 
     const zanta = makeWASocket({
         logger: P({ level: 'info' }),
-        printQRInTerminal: false, // Session Restore කරන නිසා QR Code පෙන්වන්නේ නැහැ.
+        printQRInTerminal: false,
         browser: Browsers.macOS("Firefox"),
         auth: state,
         version,
@@ -79,24 +98,17 @@ async function connectToWA() {
         generateHighQualityLinkPreview: true,
     });
 
-    // 👈 1. Message Cache Map එක initialize කිරීම (Antidelete සඳහා අත්‍යවශ්‍යයි)
+    // 👈 1. Message Cache Map එක initialize කිරීම (Antidelete සඳහා)
     zanta.messages = new Map();
 
     zanta.ev.on('connection.update', async (update) => {
-        const { connection, lastDisconnect, qr } = update; // qr ද ලබා ගන්න
+        const { connection, lastDisconnect, qr } = update;
         
-        // QR Code Logic (Session නැතිනම්)
-        if (qr) {
-             qrcode.generate(qr, { small: true });
-             console.log("SCAN THE QR CODE ABOVE TO CONNECT!");
-        }
-
         if (connection === 'close') {
-            // DisconnectReason.loggedOut වූ විට නැවත සම්බන්ධ නොවිය යුතුයි.
             if (lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut) {
                 connectToWA();
             } else {
-                 console.log('🤖 Connection logged out. Delete session files and restart the bot to scan a new QR code.');
+                 console.log('🤖 Connection logged out. Delete session files and scan a new QR code locally, or update the SESSION_ID.');
             }
         } else if (connection === 'open') {
             console.log('✅ ZANTA-MD connected to WhatsApp');
@@ -110,8 +122,6 @@ async function connectToWA() {
             fs.readdirSync("./plugins/").forEach((plugin) => {
                 if (path.extname(plugin).toLowerCase() === ".js") {
                     const pluginModule = require(`./plugins/${plugin}`);
-                    
-                    // Antidelete වැනි Event Listeners සඳහා Module Export කර ඇත්නම් එය ක්‍රියාත්මක කිරීම
                     if (typeof pluginModule === 'function') {
                         pluginModule(zanta);
                     }
@@ -121,10 +131,6 @@ async function connectToWA() {
     });
 
     zanta.ev.on('creds.update', saveCreds);
-    
-    // 👈 2. Messages Delete Event Listener එක Load කිරීම
-    // Antidelete.js file එකෙන් event listener එක load කිරීමට, එහි module.exports = zanta => {...} ලෙස තිබිය යුතුයි. 
-    // නැතහොත්, ඔබගේ antidelete.js file එකේ logic එක මෙහිදී සෘජුවම ඇතුළත් කළ යුතුයි. (දැනට plugin loader එක මත රඳා පවතී.)
 
     zanta.ev.on('messages.upsert', async ({ messages }) => {
         for (const msg of messages) {
@@ -132,10 +138,9 @@ async function connectToWA() {
                 await zanta.sendMessageAck(msg.key);
             }
             
-            // 👈 3. Message Cache එක Update කිරීම (Antidelete Logic සඳහා)
+            // 👈 2. Message Cache එක Update කිරීම (Antidelete Logic සඳහා)
             if (msg.key.id && !msg.key.fromMe && msg.key.remoteJid !== 'status@broadcast') {
                  zanta.messages.set(msg.key.id, msg);
-                 // Cache එකේ ප්‍රමාණය පාලනය කිරීම (අවශ්‍ය නම්)
                  if (zanta.messages.size > 200) {
                      zanta.messages.delete(zanta.messages.keys().next().value);
                  }
