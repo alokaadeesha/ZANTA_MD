@@ -18,7 +18,7 @@ cmd(
 {
 pattern: "ping",
 react: "⚙️",
-desc: "Display detailed bot and system information with an image.",
+desc: "Display bot information.",
 category: "main", 
 filename: __filename,
 },
