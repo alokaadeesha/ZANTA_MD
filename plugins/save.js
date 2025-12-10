@@ -7,7 +7,7 @@ cmd(
 pattern: "save",
 react: "💾",
 desc: "Saves and resends a View Once image.",
-category: "genaral",
+category: "general",
 filename: __filename,
 },
 async (zanta, mek, m, { from, reply }) => {
