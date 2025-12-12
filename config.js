@@ -7,7 +7,8 @@ return text === fault ? true : false;
 }
 
 
-const OWNER_NUMBER = '94762450884'; // ඔබගේ Bot Owner ගේ අංකය//
+const OWNER_NUMBER = '94762450884'; // ඔබගේ Bot Owner ගේ අංකය
+
 const DEFAULT_BOT_NAME = process.env.BOT_NAME || "Crazy-Bot";
 const ALIVE_MSG_TEMPLATE = aliveMessageData.getAliveMessage();
 
